@@ -14,7 +14,12 @@ const users = D.pgTable("users", {
   snakeCase: D.text("snake_case").notNull()
 })
 
-class ORM extends Effect.Service<ORM>()("ORM", { effect: Pg.make({ schema: { users } }) }) {
+const json = D.pgTable("json", {
+  id: D.serial("id").primaryKey(),
+  data: D.json("data").$type<Record<string, unknown>>().notNull()
+})
+
+class ORM extends Effect.Service<ORM>()("ORM", { effect: Pg.make({ schema: { users, json } }) }) {
   static Client = this.Default.pipe(Layer.provideMerge(PgContainer.ClientLive))
 }
 
@@ -91,4 +96,24 @@ describe.sequential("Pg", () => {
       Effect.catchTag("ContainerError", () => Effect.void)
     )
   }, { timeout: 60000 })
+
+  it.effect.fails(
+    "roundtrips JSON properly",
+    () => {
+      return Effect.gen(function*() {
+        const sql = yield* SqlClient.SqlClient
+        const orm = yield* ORM
+
+        yield* sql`CREATE TABLE json (id SERIAL PRIMARY KEY, data JSONB)`
+        yield* orm.insert(json).values({ data: { foo: "bar", baz: 3 } })
+        const res = yield* orm.select().from(json)
+        assert.deepStrictEqual(res, [{ id: 1, data: { foo: "bar", baz: 3 } }])
+      }).pipe(
+        Effect.provide([
+          ORM.Client,
+          Logger.pretty
+        ])
+      )
+    }
+  )
 })
